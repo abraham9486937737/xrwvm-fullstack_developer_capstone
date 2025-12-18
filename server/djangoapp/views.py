@@ -6,10 +6,12 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime
 import logging
 import json
-import requests
 
 from .models import CarMake, CarModel
 from .populate import initiate
+
+# Import proxy functions from restapis.py
+from .restapis import get_request, analyze_review_sentiments, post_review
 
 logger = logging.getLogger(__name__)
 
@@ -85,68 +87,53 @@ def get_cars(request):
 
 
 # ---------------------------
-# DEALERSHIP VIEWS (MongoDB)
+# DEALERSHIP VIEWS (MongoDB Proxy)
 # ---------------------------
 
-EXPRESS_BACKEND = "http://localhost:3030"
-
 @csrf_exempt
-def get_dealerships(request):
-    url = f"{EXPRESS_BACKEND}/fetchDealers"
-    response = requests.get(url)
+def get_dealerships(request, state="All"):
+    if state == "All":
+        endpoint = "/fetchDealers"
+    else:
+        endpoint = "/fetchDealers/" + state
 
-    if response.status_code == 200:
-        return JsonResponse(response.json(), safe=False)
-
-    return JsonResponse({"error": "Unable to fetch dealers"}, status=500)
+    dealerships = get_request(endpoint)
+    return JsonResponse({"status": 200, "dealers": dealerships})
 
 
-@csrf_exempt
-def get_dealer(request, dealer_id):
-    url = f"{EXPRESS_BACKEND}/fetchDealer/{dealer_id}"
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        return JsonResponse(response.json(), safe=False)
-
-    return JsonResponse({"error": "Unable to fetch dealer"}, status=500)
+def get_dealer_details(request, dealer_id):
+    if dealer_id:
+        endpoint = "/fetchDealer/" + str(dealer_id)
+        dealership = get_request(endpoint)
+        return JsonResponse({"status": 200, "dealer": dealership})
+    else:
+        return JsonResponse({"status": 400, "message": "Bad Request"})
 
 
 @csrf_exempt
 def get_dealer_reviews(request, dealer_id):
-    url = f"{EXPRESS_BACKEND}/fetchReviews/dealer/{dealer_id}"
-    response = requests.get(url)
+    if dealer_id:
+        endpoint = "/fetchReviews/dealer/" + str(dealer_id)
+        reviews = get_request(endpoint)
 
-    if response.status_code == 200:
-        return JsonResponse(response.json(), safe=False)
+        # Add sentiment to each review
+        for review_detail in reviews:
+            response = analyze_review_sentiments(review_detail['review'])
+            review_detail['sentiment'] = response['sentiment']
 
-    return JsonResponse({"error": "Unable to fetch reviews"}, status=500)
-
-
-@csrf_exempt
-def get_dealers_by_state(request, state):
-    url = f"{EXPRESS_BACKEND}/fetchDealers"
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        dealers = response.json()
-        filtered = [d for d in dealers if d["state"] == state]
-        return JsonResponse(filtered, safe=False)
-
-    return JsonResponse({"error": "Unable to fetch dealers"}, status=500)
+        return JsonResponse({"status": 200, "reviews": reviews})
+    else:
+        return JsonResponse({"status": 400, "message": "Bad Request"})
 
 
 @csrf_exempt
 def add_review(request):
-    if request.method == "POST":
-        review_data = json.loads(request.body)
-        url = f"{EXPRESS_BACKEND}/insert_review"
-
-        response = requests.post(url, json=review_data)
-
-        if response.status_code == 200:
-            return JsonResponse({"status": "Review added"})
-
-        return JsonResponse({"error": "Unable to add review"}, status=500)
-
-    return JsonResponse({"error": "Invalid request method"}, status=400)
+    if(request.user.is_anonymous == False):
+        data = json.loads(request.body)
+        try:
+            response = post_review(data)
+            return JsonResponse({"status":200})
+        except:
+            return JsonResponse({"status":401,"message":"Error in posting review"})
+    else:
+        return JsonResponse({"status":403,"message":"Unauthorized"})
