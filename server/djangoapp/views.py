@@ -1,19 +1,17 @@
-from django.shortcuts import render, redirect
-from django.http import JsonResponse, HttpResponse
+from django.shortcuts import render
+from django.http import JsonResponse
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.models import User
 from django.views.decorators.csrf import csrf_exempt
-from datetime import datetime
 import logging
 import json
 
 from .models import CarMake, CarModel
 from .populate import initiate
-
-# Import proxy functions from restapis.py
 from .restapis import get_request, analyze_review_sentiments, post_review
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------
 # USER AUTHENTICATION VIEWS
@@ -106,8 +104,8 @@ def get_dealer_details(request, dealer_id):
         endpoint = "/fetchDealer/" + str(dealer_id)
         dealership = get_request(endpoint)
         return JsonResponse({"status": 200, "dealer": dealership})
-    else:
-        return JsonResponse({"status": 400, "message": "Bad Request"})
+
+    return JsonResponse({"status": 400, "message": "Bad Request"})
 
 
 @csrf_exempt
@@ -116,24 +114,25 @@ def get_dealer_reviews(request, dealer_id):
         endpoint = "/fetchReviews/dealer/" + str(dealer_id)
         reviews = get_request(endpoint)
 
-        # Add sentiment to each review
         for review_detail in reviews:
-            response = analyze_review_sentiments(review_detail['review'])
-            review_detail['sentiment'] = response['sentiment']
+            sentiment = analyze_review_sentiments(review_detail['review'])
+            review_detail['sentiment'] = sentiment['sentiment']
 
         return JsonResponse({"status": 200, "reviews": reviews})
-    else:
-        return JsonResponse({"status": 400, "message": "Bad Request"})
+
+    return JsonResponse({"status": 400, "message": "Bad Request"})
 
 
 @csrf_exempt
 def add_review(request):
-    if(request.user.is_anonymous == False):
+    if not request.user.is_anonymous:
         data = json.loads(request.body)
         try:
-            response = post_review(data)
-            return JsonResponse({"status":200})
-        except:
-            return JsonResponse({"status":401,"message":"Error in posting review"})
-    else:
-        return JsonResponse({"status":403,"message":"Unauthorized"})
+            post_review(data)
+            return JsonResponse({"status": 200})
+        except Exception as e:
+            return JsonResponse(
+                {"status": 401, "message": "Error in posting review"}
+            )
+
+    return JsonResponse({"status": 403, "message": "Unauthorized"})
